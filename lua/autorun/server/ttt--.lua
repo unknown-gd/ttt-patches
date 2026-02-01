@@ -42,7 +42,7 @@ local feedback_time = CreateConVar( "ttt_feedback_time", "300", bit.bor( FCVAR_A
 
 ---@type ConVar
 ---@diagnostic disable-next-line: param-type-mismatch
-local allow_damage_from_detectives = CreateConVar( "ttt_allow_damage_from_detectives", "0", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Allow outgoing damage from detectives.", 0, 1 )
+local feedback_detectives_damage = CreateConVar( "ttt_feedback_detectives_damage", "0", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Allow outgoing damage from detectives.", 0, 1 )
 
 ---@type ConVar
 ---@diagnostic disable-next-line: param-type-mismatch
@@ -53,7 +53,7 @@ local feedback_distance = CreateConVar( "ttt_feedback_distance", "1024", bit.bor
 ---@param cur_time number
 ---@return boolean is_damage_allowed
 local function isAllowedToGiveDamage( attacker, victim, cur_time )
-    if attacker:IsTraitor() or ( allow_damage_from_detectives:GetBool() and attacker:IsActiveDetective() ) then
+    if attacker:IsTraitor() or ( feedback_detectives_damage:GetBool() and attacker:IsActiveDetective() ) then
         return not attacker:KeyDown( IN_USE )
     end
 

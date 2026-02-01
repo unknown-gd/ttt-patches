@@ -13,13 +13,13 @@ local text_2 = "Outgoing damage blocked!"
 
 ---@type ConVar
 ---@diagnostic disable-next-line: param-type-mismatch
-local allow_damage_from_detectives = CreateConVar( "ttt_allow_damage_from_detectives", "0", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Allow outgoing damage from detectives.", 0, 1 )
+local feedback_detectives_damage = CreateConVar( "ttt_feedback_detectives_damage", "0", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Allow outgoing damage from detectives.", 0, 1 )
 
 hook.Add( "HUDPaint", "TTT--", function()
     local pl = LocalPlayer()
 
     ---@diagnostic disable-next-line: undefined-field
-    if not ( pl ~= nil and pl:IsValid() and pl:IsActiveTraitor() or ( allow_damage_from_detectives:GetBool() and pl:IsActiveDetective() ) ) then return end
+    if not ( pl ~= nil and pl:IsValid() and pl:IsActiveTraitor() or ( feedback_detectives_damage:GetBool() and pl:IsActiveDetective() ) ) then return end
 
     surface.SetFont( "DermaLarge" )
 
