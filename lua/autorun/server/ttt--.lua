@@ -1,7 +1,5 @@
 if engine.ActiveGamemode() ~= "terrortown" then return end
 
-local addon_name = "TTT--"
-
 local RecipientFilter = RecipientFilter
 local CurTime = CurTime
 
@@ -13,7 +11,6 @@ do
     local attacks_metatable = {
         ---@param attacker Player
         __index = function( self, attacker )
-            -- return CurTime()
             return 0
         end,
         __mode = "k"
@@ -39,34 +36,39 @@ end
 ---@field IsTraitor fun( self: Player ): boolean
 ---@field IsActiveDetective fun( self: Player ): boolean
 
---- Time in seconds when damage can be given from victim
----@type integer
-local attack_frame = 60 * 5
+---@type ConVar
+---@diagnostic disable-next-line: param-type-mismatch
+local feedback_time = CreateConVar( "ttt_feedback_time", "300", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Time in seconds when damage can be given from victim.", 0, 60 * 60 )
 
----@type boolean
-local allow_damage_from_detectives = false
+---@type ConVar
+---@diagnostic disable-next-line: param-type-mismatch
+local allow_damage_from_detectives = CreateConVar( "ttt_allow_damage_from_detectives", "0", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Allow outgoing damage from detectives.", 0, 1 )
+
+---@type ConVar
+---@diagnostic disable-next-line: param-type-mismatch
+local feedback_distance = CreateConVar( "ttt_feedback_distance", "1024", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Distance limit in square meters.", 0, 2 ^ 32 - 1 )
 
 ---@param attacker Player
 ---@param victim Player
 ---@param cur_time number
 ---@return boolean is_damage_allowed
 local function isAllowedToGiveDamage( attacker, victim, cur_time )
-    if ( attacker:IsTraitor() or ( allow_damage_from_detectives and attacker:IsActiveDetective() ) ) then
+    if attacker:IsTraitor() or ( allow_damage_from_detectives:GetBool() and attacker:IsActiveDetective() ) then
         return not attacker:KeyDown( IN_USE )
     end
 
-    return ( cur_time - damage_history[ attacker ][ victim ] ) < attack_frame
+    local last_damage_time = damage_history[ attacker ][ victim ]
+    return last_damage_time ~= 0 and ( cur_time - last_damage_time ) < feedback_time:GetFloat()
 end
-
-local view_limit = 1024 ^ 2
 
 ---@param pl Player
 ---@param observed_position Vector
+---@param view_position Vector
 ---@return boolean
-local function isScreenVisible( pl, observed_position )
-    local view_position, view_angles = pl:GetPos(), pl:EyeAngles()
+local function isScreenVisible( pl, observed_position, view_position )
+    local view_angles = pl:EyeAngles()
 
-    if view_position:DistToSqr( observed_position ) > view_limit then
+    if view_position:Distance( observed_position ) > feedback_distance:GetFloat() then
         return false
     end
 
@@ -85,20 +87,31 @@ local bit_band = bit.band
 ---@param victim Player
 ---@param damage_info CTakeDamageInfo
 ---@return boolean is_damage_allowed
-hook.Add( "EntityTakeDamage", addon_name, function( victim, damage_info )
-    if not ( victim ~= nil and victim:IsValid() and victim:IsPlayer() and victim:IsTerror() and victim:Alive() ) then return end
+hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
+    ---@diagnostic disable-next-line: undefined-global
+    if GetRoundState() ~= ROUND_ACTIVE then return end
+
+    if not ( victim ~= nil and victim:IsValid() and victim:IsPlayer() and victim:IsTerror() and victim:Alive() ) or victim:IsSpec() then return end
+
+    ---@type integer
+    local alive_traitors = 0
 
     ---@type integer
     local alive_innocents = 0
 
     for _, pl in player.Iterator() do
         ---@cast pl Player
-        if pl:IsTerror() and pl:Alive() and not pl:IsTraitor() then
-            alive_innocents = alive_innocents + 1
+
+        if pl:IsTerror() and pl:Alive() then
+            if pl:IsTraitor() then
+                alive_traitors = alive_traitors + 1
+            else
+                alive_innocents = alive_innocents + 1
+            end
         end
     end
 
-    if alive_innocents == 1 then return end
+    if alive_innocents <= alive_traitors then return end
 
     local damage_type = damage_info:GetDamageType()
     if damage_type ~= 0 and
@@ -128,6 +141,11 @@ hook.Add( "EntityTakeDamage", addon_name, function( victim, damage_info )
 
     if isAllowedToGiveDamage( attacker, victim, cur_time ) then
         local observed_position = attacker:WorldSpaceCenter()
+        local view_position = victim:EyePos()
+
+        if victim:IsLineOfSightClear( observed_position ) and view_position:Distance( observed_position ) < feedback_distance:GetFloat() then
+            damage_history[ victim ][ attacker ] = cur_time
+        end
 
         local rf = RecipientFilter()
         rf:AddPVS( observed_position )
@@ -136,7 +154,7 @@ hook.Add( "EntityTakeDamage", addon_name, function( victim, damage_info )
 
         for i = 1, #viewers, 1 do
             local pl = viewers[ i ]
-            if pl ~= attacker and not pl:IsSpec() and isScreenVisible( pl, observed_position ) then
+            if pl ~= attacker and not pl:IsSpec() and isScreenVisible( pl, observed_position, view_position ) then
                 damage_history[ pl ][ attacker ] = cur_time
             end
         end
@@ -149,6 +167,15 @@ hook.Add( "EntityTakeDamage", addon_name, function( victim, damage_info )
     ---@diagnostic disable-next-line: redundant-parameter, undefined-global
 end, PRE_HOOK_RETURN )
 
-hook.Add( "PlayerSpawn", addon_name, function( pl )
+local function clearDamageHistory( pl )
     damage_history[ pl ] = nil
+end
+
+hook.Add( "PlayerSpawn", "TTT--", clearDamageHistory )
+hook.Add( "PostPlayerDeath", "TTT--", clearDamageHistory )
+
+hook.Add( "TTTBeginRound", "TTT--", function()
+    for key in pairs( damage_history ) do
+        damage_history[ key ] = nil
+    end
 end )
