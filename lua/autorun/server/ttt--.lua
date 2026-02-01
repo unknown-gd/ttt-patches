@@ -57,6 +57,26 @@ local function isAllowedToGiveDamage( attacker, victim, cur_time )
         return not attacker:KeyDown( IN_USE )
     end
 
+    ---@type integer
+    local alive_traitors = 0
+
+    ---@type integer
+    local alive_innocents = 0
+
+    for _, pl in player.Iterator() do
+        ---@cast pl Player
+
+        if pl:IsTerror() and pl:Alive() then
+            if pl:IsTraitor() then
+                alive_traitors = alive_traitors + 1
+            else
+                alive_innocents = alive_innocents + 1
+            end
+        end
+    end
+
+    if alive_innocents <= alive_traitors then return true end
+
     local last_damage_time = damage_history[ attacker ][ victim ]
     return last_damage_time ~= 0 and ( cur_time - last_damage_time ) < feedback_time:GetFloat()
 end
@@ -88,34 +108,13 @@ local bit_band = bit.band
 ---@param damage_info CTakeDamageInfo
 ---@return boolean is_damage_allowed
 hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
-    ---@diagnostic disable-next-line: undefined-global
-    if GetRoundState() ~= ROUND_ACTIVE then return end
-
     if not ( victim ~= nil and victim:IsValid() and victim:IsPlayer() and victim:IsTerror() and victim:Alive() ) or victim:IsSpec() then return end
-
-    ---@type integer
-    local alive_traitors = 0
-
-    ---@type integer
-    local alive_innocents = 0
-
-    for _, pl in player.Iterator() do
-        ---@cast pl Player
-
-        if pl:IsTerror() and pl:Alive() then
-            if pl:IsTraitor() then
-                alive_traitors = alive_traitors + 1
-            else
-                alive_innocents = alive_innocents + 1
-            end
-        end
-    end
-
-    if alive_innocents <= alive_traitors then return end
 
     local damage_type = damage_info:GetDamageType()
     if damage_type ~= 0 and
         bit_band( damage_type, DMG_CLUB ) == 0 and
+        bit_band( damage_type, DMG_DIRECT ) == 0 and
+        -- bit_band( damage_type, DMG_CRUSH ) == 0 and
         bit_band( damage_type, DMG_BULLET ) == 0 and
         bit_band( damage_type, DMG_SLASH ) == 0 and
         bit_band( damage_type, DMG_AIRBOAT ) == 0 and
