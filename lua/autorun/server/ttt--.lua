@@ -46,7 +46,7 @@ local feedback_detectives_damage = CreateConVar( "ttt_feedback_detectives_damage
 
 ---@type ConVar
 ---@diagnostic disable-next-line: param-type-mismatch
-local feedback_distance = CreateConVar( "ttt_feedback_distance", "1024", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Distance limit in square meters.", 0, 2 ^ 32 - 1 )
+local feedback_distance = CreateConVar( "ttt_feedback_distance", "16384", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Distance in units how far away damage can be seen.", 0, 2 ^ 32 - 1 )
 
 ---@param attacker Player
 ---@param victim Player
