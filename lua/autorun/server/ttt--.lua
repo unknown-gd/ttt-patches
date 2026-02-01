@@ -141,9 +141,8 @@ hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
 
     if isAllowedToGiveDamage( attacker, victim, cur_time ) then
         local observed_position = attacker:WorldSpaceCenter()
-        local view_position = victim:EyePos()
 
-        if victim:IsLineOfSightClear( observed_position ) and view_position:Distance( observed_position ) < feedback_distance:GetFloat() then
+        if victim:IsLineOfSightClear( observed_position ) and victim:EyePos():Distance( observed_position ) < feedback_distance:GetFloat() then
             damage_history[ victim ][ attacker ] = cur_time
         end
 
@@ -154,7 +153,7 @@ hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
 
         for i = 1, #viewers, 1 do
             local pl = viewers[ i ]
-            if pl ~= attacker and not pl:IsSpec() and isScreenVisible( pl, observed_position, view_position ) then
+            if pl ~= attacker and not pl:IsSpec() and isScreenVisible( pl, observed_position, pl:EyePos() ) then
                 damage_history[ pl ][ attacker ] = cur_time
             end
         end
