@@ -136,9 +136,7 @@ hook.Add( "EntityTakeDamage", addon_name, function( victim, damage_info )
 
         for i = 1, #viewers, 1 do
             local pl = viewers[ i ]
-            print( pl, pl ~= attacker, not pl:IsSpec(), isScreenVisible( pl, observed_position ) )
             if pl ~= attacker and not pl:IsSpec() and isScreenVisible( pl, observed_position ) then
-                pl:Say( attacker:Nick() .. " attacked " .. victim:Nick() .. "!" )
                 damage_history[ pl ][ attacker ] = cur_time
             end
         end
