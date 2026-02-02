@@ -1,4 +1,5 @@
 if engine.ActiveGamemode() ~= "terrortown" then return end
+util.AddNetworkString( "ttt--" )
 
 local RecipientFilter = RecipientFilter
 local CurTime = CurTime
@@ -34,26 +35,40 @@ end
 ---@field IsSpec fun( self: Player ): boolean
 ---@field IsTerror fun( self: Player ): boolean
 ---@field IsTraitor fun( self: Player ): boolean
+---@field IsDetective fun( self: Player ): boolean
 ---@field IsActiveDetective fun( self: Player ): boolean
 
 ---@type ConVar
 ---@diagnostic disable-next-line: param-type-mismatch
-local feedback_time = CreateConVar( "ttt_feedback_time", "300", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Time in seconds when damage can be given from victim.", 0, 60 * 60 )
+local feedback_time = CreateConVar( "ttt_feedback_time", "300", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Time in seconds when damage can be given from victim.", 5, 60 * 60 )
 
 ---@type ConVar
 ---@diagnostic disable-next-line: param-type-mismatch
-local feedback_detectives_damage = CreateConVar( "ttt_feedback_detectives_damage", "0", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Allow outgoing damage from detectives.", 0, 1 )
+local feedback_detectives_damage = CreateConVar( "ttt_feedback_detective_damage", "1", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Allow outgoing damage from detective.", 0, 1 )
 
----@type ConVar
----@diagnostic disable-next-line: param-type-mismatch
-local feedback_distance = CreateConVar( "ttt_feedback_distance", "16384", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Distance in units how far away damage can be seen.", 0, 2 ^ 32 - 1 )
+---@param pl Player
+---@param attacker Player
+---@param cur_time number
+local function updateTime( pl, attacker, cur_time )
+	damage_history[ pl ][ attacker ] = cur_time
+
+    net.Start( "ttt--" )
+    net.WriteUInt( 0, 2 )
+    net.WriteUInt( attacker:EntIndex(), 8 )
+    net.WriteDouble( cur_time + feedback_time:GetFloat() )
+	net.Send( pl )
+end
 
 ---@param attacker Player
 ---@param victim Player
 ---@param cur_time number
 ---@return boolean is_damage_allowed
 local function isAllowedToGiveDamage( attacker, victim, cur_time )
-    if attacker:IsTraitor() or ( feedback_detectives_damage:GetBool() and attacker:IsActiveDetective() ) then
+    if attacker:IsActiveDetective() and feedback_detectives_damage:GetBool() then
+        return true
+    end
+
+    if attacker:IsTraitor() then
         return not attacker:KeyDown( IN_USE )
     end
 
@@ -83,18 +98,14 @@ end
 
 ---@param pl Player
 ---@param observed_position Vector
----@param view_position Vector
 ---@return boolean
-local function isScreenVisible( pl, observed_position, view_position )
-    local view_angles = pl:EyeAngles()
-
-    if view_position:Distance( observed_position ) > feedback_distance:GetFloat() then
-        return false
-    end
-
+local function isScreenVisible( pl, observed_position )
     if not pl:IsLineOfSightClear( observed_position ) then
         return false
     end
+
+    local view_position = pl:EyePos()
+    local view_angles = pl:EyeAngles()
 
     local observed_direction = view_position - observed_position
     observed_direction:Normalize()
@@ -108,7 +119,7 @@ local bit_band = bit.band
 ---@param damage_info CTakeDamageInfo
 ---@return boolean is_damage_allowed
 hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
-    if not ( victim ~= nil and victim:IsValid() and victim:IsPlayer() and victim:IsTerror() and victim:Alive() ) or victim:IsSpec() then return end
+    if not ( victim ~= nil and victim:IsValid() and victim:IsPlayer() and victim:IsTerror() and victim:Alive() ) then return end
 
     local damage_type = damage_info:GetDamageType()
     if damage_type ~= 0 and
@@ -141,9 +152,11 @@ hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
     if isAllowedToGiveDamage( attacker, victim, cur_time ) then
         local observed_position = attacker:WorldSpaceCenter()
 
-        if victim:IsLineOfSightClear( observed_position ) and victim:EyePos():Distance( observed_position ) < feedback_distance:GetFloat() then
-            damage_history[ victim ][ attacker ] = cur_time
+        if victim:IsLineOfSightClear( observed_position ) then
+            updateTime( victim, attacker, cur_time )
         end
+
+        if attacker:IsDetective() then return end
 
         local rf = RecipientFilter()
         rf:AddPVS( observed_position )
@@ -152,8 +165,8 @@ hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
 
         for i = 1, #viewers, 1 do
             local pl = viewers[ i ]
-            if pl ~= attacker and not pl:IsSpec() and isScreenVisible( pl, observed_position, pl:EyePos() ) then
-                damage_history[ pl ][ attacker ] = cur_time
+            if pl ~= attacker and pl:IsTerror() and pl:Alive() and isScreenVisible( pl, observed_position ) then
+                updateTime( pl, attacker, cur_time )
             end
         end
 
@@ -165,15 +178,70 @@ hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
     ---@diagnostic disable-next-line: redundant-parameter, undefined-global
 end, PRE_HOOK_RETURN )
 
+---@param pl Player
 local function clearDamageHistory( pl )
+    net.Start( "ttt--" )
+    net.WriteUInt( 1, 2 )
+    net.WriteUInt( pl:EntIndex(), 8 )
+    net.SendOmit( pl )
+
     damage_history[ pl ] = nil
 end
+
+---@param detective Player
+---@param killer Player
+---@param entity Entity
+hook.Add( "TTTFoundDNA", "TTT--", function( detective, killer, entity )
+    -- if not ( entity ~= nil and entity:IsValid() and entity:IsRagdoll() ) then return end
+    if not ( killer:IsValid() and killer:Alive() and killer:IsTerror() ) then return end
+
+    local detective_position = detective:WorldSpaceCenter()
+    local cur_time = CurTime()
+
+    for _, pl in player.Iterator() do
+        if pl ~= killer and pl:IsTerror() and pl:Alive() and pl:IsLineOfSightClear( detective_position ) and pl:EyePos():Distance( detective_position ) < 512 then
+            updateTime( pl, killer, cur_time )
+        end
+    end
+end )
 
 hook.Add( "PlayerSpawn", "TTT--", clearDamageHistory )
 hook.Add( "PostPlayerDeath", "TTT--", clearDamageHistory )
 
+hook.Add( "TTTKarmaLow", "TTT--", function( pl )
+    return false
+end )
+
+local ttt_karma_low_amount = GetConVar( "ttt_karma_low_amount" )
+
+local function hasLowKarma( pl )
+    return pl:GetBaseKarma() <= ttt_karma_low_amount:GetInt()
+end
+
+hook.Add( "TTTKarmaGivePenalty", "TTT--", function( attacker, _, victim )
+    if victim ~= nil and victim:IsValid() and hasLowKarma( victim ) then
+        return false
+    end
+end )
+
 hook.Add( "TTTBeginRound", "TTT--", function()
+    net.Start( "ttt--" )
+    net.WriteUInt( 2, 2 )
+    net.Broadcast()
+
     for key in pairs( damage_history ) do
         damage_history[ key ] = nil
+    end
+
+    local round_end_time = GetGlobalFloat( "ttt_round_end", CurTime() )
+
+    for _, low_karma_pl in player.Iterator() do
+        if hasLowKarma( low_karma_pl ) then
+            for _, pl in player.Iterator() do
+                if pl ~= low_karma_pl and pl:IsTerror() and pl:Alive() then
+                    updateTime( pl, low_karma_pl, round_end_time )
+                end
+            end
+        end
     end
 end )
