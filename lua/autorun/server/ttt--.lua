@@ -51,6 +51,7 @@ local feedback_detectives_damage = CreateConVar( "ttt_feedback_detective_damage"
 ---@param cur_time number
 local function updateTime( pl, attacker, cur_time )
 	damage_history[ pl ][ attacker ] = cur_time
+    if pl:IsBot() then return end
 
     net.Start( "ttt--" )
     net.WriteUInt( 0, 2 )
@@ -208,40 +209,44 @@ end )
 hook.Add( "PlayerSpawn", "TTT--", clearDamageHistory )
 hook.Add( "PostPlayerDeath", "TTT--", clearDamageHistory )
 
-hook.Add( "TTTKarmaLow", "TTT--", function( pl )
-    return false
-end )
+timer.Simple( 0, function()
 
-local ttt_karma_low_amount = GetConVar( "ttt_karma_low_amount" )
-
-local function hasLowKarma( pl )
-    return pl:GetBaseKarma() <= ttt_karma_low_amount:GetInt()
-end
-
-hook.Add( "TTTKarmaGivePenalty", "TTT--", function( attacker, _, victim )
-    if victim ~= nil and victim:IsValid() and hasLowKarma( victim ) then
+    hook.Add( "TTTKarmaLow", "TTT--", function( pl )
         return false
-    end
-end )
+    end )
 
-hook.Add( "TTTBeginRound", "TTT--", function()
-    net.Start( "ttt--" )
-    net.WriteUInt( 2, 2 )
-    net.Broadcast()
+    local ttt_karma_low_amount = GetConVar( "ttt_karma_low_amount" )
 
-    for key in pairs( damage_history ) do
-        damage_history[ key ] = nil
+    local function hasLowKarma( pl )
+        return pl:GetBaseKarma() <= ttt_karma_low_amount:GetInt()
     end
 
-    local round_end_time = GetGlobalFloat( "ttt_round_end", CurTime() )
+    hook.Add( "TTTKarmaGivePenalty", "TTT--", function( attacker, _, victim )
+        if victim ~= nil and victim:IsValid() and hasLowKarma( victim ) then
+            return false
+        end
+    end )
 
-    for _, low_karma_pl in player.Iterator() do
-        if hasLowKarma( low_karma_pl ) then
-            for _, pl in player.Iterator() do
-                if pl ~= low_karma_pl and pl:IsTerror() and pl:Alive() then
-                    updateTime( pl, low_karma_pl, round_end_time )
+    hook.Add( "TTTBeginRound", "TTT--", function()
+        net.Start( "ttt--" )
+        net.WriteUInt( 2, 2 )
+        net.Broadcast()
+
+        for key in pairs( damage_history ) do
+            damage_history[ key ] = nil
+        end
+
+        local round_end_time = GetGlobalFloat( "ttt_round_end", CurTime() )
+
+        for _, low_karma_pl in player.Iterator() do
+            if hasLowKarma( low_karma_pl ) then
+                for _, pl in player.Iterator() do
+                    if pl ~= low_karma_pl and pl:IsTerror() and pl:Alive() then
+                        updateTime( pl, low_karma_pl, round_end_time )
+                    end
                 end
             end
         end
-    end
+    end )
+
 end )
