@@ -2,7 +2,10 @@ if engine.ActiveGamemode() ~= "terrortown" then return end
 util.AddNetworkString( "ttt--" )
 
 local RecipientFilter = RecipientFilter
+local table_remove = table.remove
 local CurTime = CurTime
+
+local timer = timer
 
 ---@type table<Player, table<Player, number>>
 local damage_history = {}
@@ -37,6 +40,7 @@ end
 ---@field IsTraitor fun( self: Player ): boolean
 ---@field IsDetective fun( self: Player ): boolean
 ---@field IsActiveDetective fun( self: Player ): boolean
+---@field IsActiveTraitor fun( self: Player ): boolean
 
 ---@type ConVar
 ---@diagnostic disable-next-line: param-type-mismatch
@@ -46,18 +50,53 @@ local feedback_time = CreateConVar( "ttt_feedback_time", "300", bit.bor( FCVAR_A
 ---@diagnostic disable-next-line: param-type-mismatch
 local feedback_detectives_damage = CreateConVar( "ttt_feedback_detective_damage", "1", bit.bor( FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY ), "Allow outgoing damage from detective.", 0, 1 )
 
----@param pl Player
----@param attacker Player
+---@param victim Player
+---@param attackers Player
 ---@param cur_time number
-local function updateTime( pl, attacker, cur_time )
-	damage_history[ pl ][ attacker ] = cur_time
-    if pl:IsBot() then return end
+local function updateTimes( victim, attackers, cur_time )
+    if not ( victim:Alive() and victim:IsTerror() ) then return end
+
+    local markers = {}
+    local marker_count = 0
+
+    for i = #attackers, 1, -1 do
+        local attacker = attackers[ i ]
+        if attacker:IsTerror() and attacker:Alive() and attacker ~= victim then
+            marker_count = marker_count + 1
+            markers[ marker_count ] = attacker
+            damage_history[ victim ][ attacker ] = cur_time
+        end
+    end
+
+    if victim:IsBot() then return end
 
     net.Start( "ttt--" )
-    net.WriteUInt( 0, 2 )
+    net.WriteUInt( 3, 8 )
+    net.WriteDouble( cur_time + feedback_time:GetFloat() )
+
+    for i = 1, marker_count, 1 do
+        net.WriteUInt( markers[ i ]:EntIndex(), 8 )
+    end
+
+	net.Send( victim )
+end
+
+---@param victim Player
+---@param attacker Player
+---@param cur_time number
+local function updateTime( victim, attacker, cur_time )
+    if not ( victim:Alive() and victim:IsTerror() ) then return end
+    if not ( attacker:IsTerror() and attacker:Alive() ) or attacker == victim then return end
+
+    damage_history[ victim ][ attacker ] = cur_time
+
+    if victim:IsBot() then return end
+
+    net.Start( "ttt--" )
+    net.WriteUInt( 0, 8 )
     net.WriteUInt( attacker:EntIndex(), 8 )
     net.WriteDouble( cur_time + feedback_time:GetFloat() )
-	net.Send( pl )
+	net.Send( victim )
 end
 
 ---@param attacker Player
@@ -67,31 +106,9 @@ end
 local function isAllowedToGiveDamage( attacker, victim, cur_time )
     if attacker:IsActiveDetective() and feedback_detectives_damage:GetBool() then
         return true
-    end
-
-    if attacker:IsTraitor() then
+    elseif attacker:IsTraitor() then
         return not attacker:KeyDown( IN_USE )
     end
-
-    ---@type integer
-    local alive_traitors = 0
-
-    ---@type integer
-    local alive_innocents = 0
-
-    for _, pl in player.Iterator() do
-        ---@cast pl Player
-
-        if pl:IsTerror() and pl:Alive() then
-            if pl:IsTraitor() then
-                alive_traitors = alive_traitors + 1
-            else
-                alive_innocents = alive_innocents + 1
-            end
-        end
-    end
-
-    if alive_innocents <= alive_traitors then return true end
 
     local last_damage_time = damage_history[ attacker ][ victim ]
     return last_damage_time ~= 0 and ( cur_time - last_damage_time ) < feedback_time:GetFloat()
@@ -118,7 +135,7 @@ local bit_band = bit.band
 
 ---@param victim Player
 ---@param damage_info CTakeDamageInfo
----@return boolean is_damage_allowed
+---@return boolean | nil is_damage_allowed
 hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
     if not ( victim ~= nil and victim:IsValid() and victim:IsPlayer() and victim:IsTerror() and victim:Alive() ) then return end
 
@@ -166,7 +183,7 @@ hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
 
         for i = 1, #viewers, 1 do
             local pl = viewers[ i ]
-            if pl ~= attacker and pl:IsTerror() and pl:Alive() and isScreenVisible( pl, observed_position ) then
+            if pl ~= attacker and pl:IsTerror() and isScreenVisible( pl, observed_position ) then
                 updateTime( pl, attacker, cur_time )
             end
         end
@@ -179,16 +196,6 @@ hook.Add( "EntityTakeDamage", "TTT--", function( victim, damage_info )
     ---@diagnostic disable-next-line: redundant-parameter, undefined-global
 end, PRE_HOOK_RETURN )
 
----@param pl Player
-local function clearDamageHistory( pl )
-    net.Start( "ttt--" )
-    net.WriteUInt( 1, 2 )
-    net.WriteUInt( pl:EntIndex(), 8 )
-    net.SendOmit( pl )
-
-    damage_history[ pl ] = nil
-end
-
 ---@param detective Player
 ---@param killer Player
 ---@param entity Entity
@@ -200,14 +207,71 @@ hook.Add( "TTTFoundDNA", "TTT--", function( detective, killer, entity )
     local cur_time = CurTime()
 
     for _, pl in player.Iterator() do
-        if pl ~= killer and pl:IsTerror() and pl:Alive() and pl:IsLineOfSightClear( detective_position ) and pl:EyePos():Distance( detective_position ) < 512 then
+        if pl ~= killer and pl:IsTerror() and pl:IsLineOfSightClear( detective_position ) and pl:EyePos():Distance( detective_position ) < 512 then
             updateTime( pl, killer, cur_time )
         end
     end
 end )
 
-hook.Add( "PlayerSpawn", "TTT--", clearDamageHistory )
-hook.Add( "PostPlayerDeath", "TTT--", clearDamageHistory )
+do
+
+    ---@param pl Player
+    local function clearDamageHistory( pl )
+        net.Start( "ttt--" )
+        net.WriteUInt( 1, 8 )
+        net.WriteUInt( pl:EntIndex(), 8 )
+        net.SendOmit( pl )
+
+        damage_history[ pl ] = nil
+    end
+
+    hook.Add( "PostPlayerDeath", "TTT--", clearDamageHistory )
+    hook.Add( "PlayerSpawn", "TTT--", clearDamageHistory )
+
+end
+
+local function player_death()
+    ---@diagnostic disable-next-line: undefined-global
+    if GetRoundState() ~= ROUND_ACTIVE then return end
+
+    ---@type integer
+    local alive_traitors = 0
+
+    ---@type integer
+    local alive_innocents = 0
+
+    ---@type Player[]
+    local alive_players = {}
+
+    ---@type integer
+    local alive_count = 0
+
+    for _, pl in player.Iterator() do
+        ---@cast pl Player
+
+        if pl:IsTerror() and pl:Alive() then
+            if pl:IsTraitor() then
+                alive_traitors = alive_traitors + 1
+            else
+                alive_innocents = alive_innocents + 1
+            end
+
+            alive_count = alive_count + 1
+            alive_players[ alive_count ] = pl
+        end
+    end
+
+    if alive_innocents > alive_traitors or alive_count < 2 then return end
+
+    local round_end_time = GetGlobalFloat( "ttt_round_end", CurTime() )
+
+    for i = 1, alive_count, 1 do
+        updateTimes( alive_players[ i ], alive_players, round_end_time )
+    end
+
+    PrintMessage( HUD_PRINTCENTER, "Most of the players are dead, damage restrictions are disabled!" )
+    PrintMessage( HUD_PRINTCONSOLE, "[TTT--] Damage restrictions disabled." )
+end
 
 timer.Simple( 0, function()
 
@@ -218,7 +282,7 @@ timer.Simple( 0, function()
     local ttt_karma_low_amount = GetConVar( "ttt_karma_low_amount" )
 
     local function hasLowKarma( pl )
-        return pl:GetBaseKarma() <= ttt_karma_low_amount:GetInt()
+        return ttt_karma_low_amount ~= nil and pl:GetBaseKarma() <= ttt_karma_low_amount:GetInt()
     end
 
     hook.Add( "TTTKarmaGivePenalty", "TTT--", function( attacker, _, victim )
@@ -229,7 +293,7 @@ timer.Simple( 0, function()
 
     hook.Add( "TTTBeginRound", "TTT--", function()
         net.Start( "ttt--" )
-        net.WriteUInt( 2, 2 )
+        net.WriteUInt( 2, 8 )
         net.Broadcast()
 
         for key in pairs( damage_history ) do
@@ -241,12 +305,134 @@ timer.Simple( 0, function()
         for _, low_karma_pl in player.Iterator() do
             if hasLowKarma( low_karma_pl ) then
                 for _, pl in player.Iterator() do
-                    if pl ~= low_karma_pl and pl:IsTerror() and pl:Alive() then
+                    if pl ~= low_karma_pl and pl:IsTerror() then
                         updateTime( pl, low_karma_pl, round_end_time )
                     end
                 end
             end
         end
+
+        timer.Simple( 0.25, player_death )
     end )
 
 end )
+
+hook.Add( "PostPlayerDeath", "TTT--", function()
+    timer.Create( "TTT--::Player Death", 0.5, 1, player_death )
+end )
+
+do
+
+    local listeners = {}
+
+    setmetatable( listeners, {
+        __mode = "k",
+        __index = function( self, pl )
+            local speakers = {}
+            self[ pl ] = speakers
+            return speakers
+        end
+    } )
+
+    local mono_mode = {}
+
+    setmetatable( mono_mode, {
+        __mode = "k",
+        __index = function( self, pl )
+            local speakers = {}
+            self[ pl ] = speakers
+            return speakers
+        end
+    } )
+
+    timer.Create( "TTT--::Voice Chat", 0.25, 0, function()
+        local rf = RecipientFilter()
+
+        for _, listener in player.Iterator() do
+            if not listener:IsBot() then
+                local listener_position = listener:EyePos()
+
+                local speakers = {}
+
+                if listener:Alive() and listener:IsTerror() then
+                    rf:RemoveAllPlayers()
+                    rf:AddPAS( listener_position )
+
+                    local players = rf:GetPlayers()
+
+                    for i = #players, 1, -1 do
+                        local speaker = players[ i ]
+                        if speaker ~= listener and not speaker:IsBot() and speaker:Alive() and speaker:IsTerror() and speaker:EyePos():Distance( listener_position ) < ( speaker:IsLineOfSightClear( listener_position ) and 2048 or 256 ) then
+                            speakers[ speaker ] = true
+                        end
+                    end
+                else
+
+                    local mono = {}
+
+                    for _, speaker in player.Iterator() do
+                        if speaker ~= listener and not speaker:IsBot() then
+                            if speaker:Alive() and speaker:IsTerror() then
+                                speakers[ speaker ] = speaker:EyePos():Distance( listener_position ) < ( speaker:IsLineOfSightClear( listener_position ) and 2048 or 256 )
+                            else
+                                speakers[ speaker ] = true
+                                mono[ speaker ] = true
+                            end
+                        end
+                    end
+
+                    mono_mode[ listener ] = mono
+
+                end
+
+                listeners[ listener ] = speakers
+            end
+        end
+    end )
+
+    -- Mute players when we are about to run map cleanup, because it might cause
+    -- net buffer overflows on clients.
+    local mute_all = false
+
+    function MuteForRestart( state )
+        mute_all = state
+    end
+
+    hook.Add( "PlayerCanHearPlayersVoice", "TTT--", function( arguments, listener, speaker )
+        -- Enforced silence
+        if mute_all then
+            return false, false
+        end
+
+        local should_hear = arguments[ 1 ]
+        if should_hear ~= nil then
+            return should_hear
+        end
+
+        -- Specific mute
+        ---@diagnostic disable-next-line: undefined-global
+        if listener:IsSpec() and listener.mute_team == speaker:Team() or listener.mute_team == MUTE_ALL then
+            return false, false
+        end
+
+        -- Specs should not hear each other locationally
+        if speaker:IsSpec() and listener:IsSpec() then
+            return true, false
+        end
+
+        if speaker:IsActiveTraitor() and not speaker.traitor_gvoice then
+            if listener:IsActiveTraitor() then
+                return true, true
+            else
+                return false, false
+            end
+        end
+
+        if listeners[ listener ][ speaker ] then
+            return true, not mono_mode[ listener ][ speaker ]
+        end
+
+        return false, false
+    end, POST_HOOK_RETURN )
+
+end

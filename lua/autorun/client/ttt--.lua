@@ -51,6 +51,7 @@ hook.Add( "ScalePlayerDamage", "TTT--", function( pl, _, damage_info )
 end )
 
 local handlers = {
+    -- add a mark
     [ 0 ] = function()
         local attacker_index = net.ReadUInt( 8 )
         local end_time = net.ReadDouble()
@@ -75,6 +76,8 @@ local handlers = {
             fade = 1
         }
     end,
+
+    -- remove a mark
     [ 1 ] = function()
         local attacker_index = net.ReadUInt( 8 )
         local player_count = marked_players[ 0 ]
@@ -88,8 +91,41 @@ local handlers = {
             end
         end
     end,
+    -- clear
     [ 2 ] = function()
         marked_players = { [ 0 ] = 0 }
+    end,
+    -- all vs all
+    [ 3 ] = function( length )
+        local end_time = net.ReadDouble()
+        length = length - 64
+
+        local player_count = marked_players[ 0 ]
+
+        for i = 0, length, 8 do
+
+        end
+
+        local attacker_index = net.ReadUInt( 8 )
+        length = length - 8
+
+        for i = 1, player_count, 1 do
+            local mark = marked_players[ i ]
+            if mark.index == attacker_index then
+                mark.end_time = end_time
+                return
+            end
+        end
+
+        player_count = player_count + 1
+        marked_players[ 0 ] = player_count
+
+        marked_players[ player_count ] = {
+            index = attacker_index,
+            end_time = end_time,
+            visible = false,
+            fade = 1
+        }
     end
 }
 
@@ -124,14 +160,18 @@ do
         end
 
         marked_players[ 0 ] = player_count
+
+        -- fuck you
+        timer.Remove( "idlecheck" )
     end )
 
 end
 
-net.Receive( "ttt--", function()
-    local fn = handlers[ net.ReadUInt( 2 ) ]
+net.Receive( "ttt--", function( length )
+    local fn = handlers[ net.ReadUInt( 8 ) ]
     if fn == nil then return end
-    fn()
+    length = length - 8
+    fn( length )
 end )
 
 do
@@ -222,4 +262,27 @@ hook.Add( "HUDPaint", "TTT--", function()
 
     surface.SetTextColor( 255, 255, 255, 255 )
     surface.DrawText( text )
+end )
+
+local PLAYER = FindMetaTable( "Player" )
+
+if PLAYER ~= nil then
+
+    function PLAYER:SetRole( role )
+        if not role or self.role == role then return end
+        self.role = role
+        hook.Run( "TTTRole", self, role )
+    end
+
+end
+
+hook.Add( "TTTRole", "TTT--", function( pl, role )
+---@diagnostic disable-next-line: undefined-global
+    if role ~= ROLE_TRAITOR then return end
+
+    sound.PlayURL( "https://raw.githubusercontent.com/space-wizards/space-station-14/refs/heads/master/Resources/Audio/Ambience/Antag/traitor_start.ogg", "mono noplay", function( channel )
+        if not ( channel ~= nil and channel:IsValid() ) then return end
+        channel:SetVolume( 0.8 )
+        channel:Play()
+    end )
 end )
