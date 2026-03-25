@@ -409,6 +409,9 @@ do
             return should_hear
         end
 
+	    ---@diagnostic disable-next-line: undefined-global
+	    if GetRoundState() ~= ROUND_ACTIVE then return true, false end
+
         -- Specific mute
         ---@diagnostic disable-next-line: undefined-global
         if listener:IsSpec() and listener.mute_team == speaker:Team() or listener.mute_team == MUTE_ALL then
@@ -422,7 +425,7 @@ do
 
         if speaker:IsActiveTraitor() and not speaker.traitor_gvoice then
             if listener:IsActiveTraitor() then
-                return true, true
+                return true, false
             else
                 return false, false
             end

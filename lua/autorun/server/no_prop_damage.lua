@@ -10,5 +10,8 @@ hook.Add( "EntityTakeDamage", "NoMorePropDamage", function( pl, damage_info )
     if not ( phys ~= nil and phys:IsValid() ) then return end
     if phys:GetMass() > 250 then return end
 
+    damage_info:SetDamageForce( vector_origin )
+    damage_info:SetDamage( 0 )
+
     return true
 end )

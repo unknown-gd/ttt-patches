@@ -152,6 +152,9 @@ do
                         mark.fade = math.Clamp( 1 - ( mark.end_time - cur_time ) / 10, 0, 1 )
                         mark.visible = entity:IsLineOfSightClear( view_position )
                     end
+                else
+                    player_count = player_count - 1
+                    table.remove( marked_players, i )
                 end
             else
                 player_count = player_count - 1
@@ -264,17 +267,20 @@ hook.Add( "HUDPaint", "TTT--", function()
     surface.DrawText( text )
 end )
 
-local PLAYER = FindMetaTable( "Player" )
+timer.Simple( 5, function ()
+    local PLAYER = FindMetaTable( "Player" )
 
-if PLAYER ~= nil then
+    if PLAYER ~= nil then
 
-    function PLAYER:SetRole( role )
-        if not role or self.role == role then return end
-        self.role = role
-        hook.Run( "TTTRole", self, role )
+        function PLAYER:SetRole( role )
+            if not role or self.role == role then return end
+            self.role = role
+            hook.Run( "TTTRole", self, role )
+        end
+
     end
+end)
 
-end
 
 hook.Add( "TTTRole", "TTT--", function( pl, role )
 ---@diagnostic disable-next-line: undefined-global
