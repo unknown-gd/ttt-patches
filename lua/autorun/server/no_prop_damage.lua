@@ -9,7 +9,7 @@ hook.Add( "EntityTakeDamage", "NoMorePropDamage", function( pl, damage_info )
     if not ( attacker ~= nil and attacker:IsValid() ) then return end
 
     local b1, b2, b3, b4, b5 = string_byte( attacker:GetClass(), 1, 5 )
-	if ( ( ( ( b5 * 0x100 + b4 ) * 0x100 + b3 ) * 0x100 + b2 ) * 0x100 + b1 ) == 0x5f706f7270 --[[ prop_ signature ]] then return end
+    if ( ( ( ( b5 * 0x100 + b4 ) * 0x100 + b3 ) * 0x100 + b2 ) * 0x100 + b1 ) ~= 0x5f706f7270 --[[ prop_ signature ]] then return end
 
     local phys = attacker:GetPhysicsObject()
     if not ( phys ~= nil and phys:IsValid() ) then return end
