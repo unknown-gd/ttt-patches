@@ -3,6 +3,7 @@ if engine.ActiveGamemode() ~= "terrortown" then return end
 timer.Simple( 0, function()
     ---@diagnostic disable-next-line: undefined-global
     local PROPSPEC = PROPSPEC
+    if PROPSPEC == nil then return end
 
     local original_fn = PROPSPEC.Key
     if original_fn == nil then return end
@@ -42,6 +43,7 @@ timer.Simple( 0, function()
     end
 
     local propspec_toggle = GetConVar( "ttt_spec_prop_control" )
+    if propspec_toggle == nil then return end
 
     ---@param pl Player
     ---@param entity Entity

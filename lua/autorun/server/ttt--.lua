@@ -2,7 +2,6 @@ if engine.ActiveGamemode() ~= "terrortown" then return end
 util.AddNetworkString( "ttt--" )
 
 local RecipientFilter = RecipientFilter
-local table_remove = table.remove
 local CurTime = CurTime
 
 local timer = timer
