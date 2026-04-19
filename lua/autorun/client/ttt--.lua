@@ -281,10 +281,9 @@ timer.Simple( 5, function ()
     end
 end)
 
-
 hook.Add( "TTTRole", "TTT--", function( pl, role )
----@diagnostic disable-next-line: undefined-global
-    if role ~= ROLE_TRAITOR then return end
+    ---@diagnostic disable-next-line: undefined-global
+    if role ~= ROLE_TRAITOR or pl ~= LocalPlayer() then return end
 
     sound.PlayURL( "https://raw.githubusercontent.com/space-wizards/space-station-14/refs/heads/master/Resources/Audio/Ambience/Antag/traitor_start.ogg", "mono noplay", function( channel )
         if not ( channel ~= nil and channel:IsValid() ) then return end

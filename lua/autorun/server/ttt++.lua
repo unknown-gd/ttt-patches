@@ -71,3 +71,43 @@ timer.Simple( 0, function()
     end
 
 end )
+
+do
+
+    local exploded = {}
+
+    setmetatable( exploded, {
+        __mode = "k"
+    } )
+
+    ---@param entity Entity
+    local function explode( entity )
+        if exploded[ entity ] then return end
+        exploded[ entity ] = true
+
+        local effectdata = EffectData()
+        effectdata:SetOrigin( entity:GetPos() )
+        util.Effect( "Explosion", effectdata )
+
+        util.BlastDamage( entity, entity, entity:GetPos(), 256, 45 )
+        entity:Remove()
+    end
+
+    ---@param entity Entity
+    ---@param damage_info CTakeDamageInfo
+    hook.Add( "EntityTakeDamage", "TTT++", function( entity, damage_info )
+        ---@diagnostic disable-next-line: undefined-field
+        if entity.Base ~= "base_ammo_ttt" then return end
+
+        if damage_info:IsBulletDamage() then
+            if math.random( 1, 10 ) == 4 then return end
+            entity:Ignite( 10, 32 )
+        elseif damage_info:IsDamageType( DMG_BURN ) and math.random( 1, 10 ) == 3 then
+            explode( entity )
+        elseif damage_info:IsDamageType( DMG_BLAST ) then
+            if math.random( 1, 10 ) == 5 then return end
+            explode( entity )
+        end
+    end, PRE_HOOK )
+
+end
